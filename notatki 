@@ -1,0 +1,5 @@
+Model A:
+Implementacja XGBoost lub LightGBM
+
+Model B:
+Implementacja (LSTM / GRY lub Temporal Fusion Transformer)
