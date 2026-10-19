@@ -8,9 +8,9 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from database.connection import engine
-from scripts.run_backfill import run_backfill
+from scripts.backfill import run_backfill
 from scripts.evaluate import run_evaluation
-from scripts.predict_future import run_prediction
+from scripts.predict import run_prediction
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("daily_update")

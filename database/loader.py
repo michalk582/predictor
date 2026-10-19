@@ -1,7 +1,6 @@
 import pandas as pd
 import holidays
 from database.connection import engine
-from sklearn.model_selection import train_test_split
 import numpy as np
 
 TARGET = "load_actual"
