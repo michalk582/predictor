@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, DateTime
+from sqlalchemy import Column, String, Float, DateTime, Integer, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 
 
@@ -12,7 +12,6 @@ class KseLoad(Base):
     load_actual = Column(Float, nullable=True) # Rzeczywiste zapotrzebowanie
     load_fcst = Column(Float, nullable=True) # Oficjalna prognoza
 
-
 class WeatherLoad(Base):
     __tablename__ = "weather_load"
     dtime = Column(DateTime, primary_key=True)
@@ -20,3 +19,19 @@ class WeatherLoad(Base):
     temperature = Column(Float)  # Temperatura 2m (°C)
     wind_speed = Column(Float)  # Prędkość wiatru (m/s)
     radiation = Column(Float)
+
+class Predictions(Base):
+    __tablename__ = "predictions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    forecast_made_at = Column(DateTime, nullable=False, index=True)
+
+    dtime = Column(DateTime, nullable=False, index=True)  # godzina, której dotyczy prognoza
+    business_date = Column(String(10), index=True)
+    temperature = Column(Float)
+    wind_speed = Column(Float)
+    radiation = Column(Float)
+
+    load_model_prediction = Column(Float, nullable=False)
+    model_version = Column(String)
+    __table_args__ = (UniqueConstraint("forecast_made_at", "dtime", name="uq_pred_run_dtime"),)
+

@@ -11,73 +11,63 @@ class PseApiClient:
     def __init__(self):
         self.base_url = "https://api.raporty.pse.pl/api"
 
-    def get_kse_load(self, date_str: str) -> pd.DataFrame:
-        endpoint = f"{self.base_url}/his-wlk-cal"
-        params = {"$filter": f"business_date eq '{date_str}'"}
+    def get_kse_load(self, start_date: str, end_date: str):
+        url = f"{self.base_url}/his-wlk-cal"
+        all_records = []
 
-        try:
-            response = requests.get(endpoint, params=params, timeout=10)
-        except requests.exceptions.RequestException as e:
-            print(f"Błąd z API PSE dla {date_str}: {e}")
+        # Generujemy listę pojedynczych dni w zadanym zakresie (np. cały styczeń)
+        days = pd.date_range(start=start_date, end=end_date)
+
+        # Pętla ukryta wewnątrz klienta API - szybkie zapytania dzień po dniu
+        for single_date in days:
+            day_str = single_date.strftime('%Y-%m-%d')
+            params = {
+                # Pytamy tylko o jeden dzień (96 rekordów = omijamy limit 100!)
+                "$filter": f"business_date eq '{day_str}'"
+            }
+
+            try:
+                response = requests.get(url, params=params, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if "value" in data and len(data["value"]) > 0:
+                        all_records.extend(data["value"])
+            except Exception as e:
+                print(f"-> Błąd połączenia z PSE dla {day_str}: {e}")
+
+        # Jeśli po sprawdzeniu wszystkich dni z miesiąca nic nie mamy
+        if not all_records:
             return pd.DataFrame()
 
-        if response.status_code == 200:
-            data = response.json()
+        # Przekształcamy zebrane wiersze z całego miesiąca na DataFrame
+        df = pd.DataFrame(all_records)
 
-            if 'value' in data and len(data['value']) > 0:
-                df = pd.DataFrame(data['value'])
-                df.columns = [col.lower() for col in df.columns]
+        df = df.rename(columns={'demand': 'load_actual'})
+        df['load_fcst'] = None
 
-                # Jawne i pewne mapowanie nazw kolumn z API PSE na naszą bazę
-                col_mapping = {
-                    'demand': 'load_actual',  # Nowa nazwa z API PSE
-                    'zapotrzebowanie': 'load_actual',  # Alternatywna nazwa
-                    'udtczas': 'dtime',
-                    'data_time': 'dtime',
-                    'ts': 'dtime',
-                    'tc': 'period',
-                    'okres': 'period'
-                }
-                df = df.rename(columns=col_mapping)
+        df['dtime'] = pd.to_datetime(df['dtime'])
+        if df['dtime'].dt.tz is not None:
+            df['dtime'] = df['dtime'].dt.tz_localize(None)
 
-                # Bezpieczne parsowanie czasu
-                if 'dtime' in df.columns:
-                    df['dtime'] = pd.to_datetime(df['dtime'])
-                    if df['dtime'].dt.tz is not None:
-                        df['dtime'] = df['dtime'].dt.tz_localize(None)
+        df = df.set_index('dtime')
 
-                # Uzupełnienie brakujących kolumn
-                if 'load_fcst' not in df.columns:
-                    df['load_fcst'] = None
-                if 'period' not in df.columns:
-                    df['period'] = 'unknown'
+        # Uśredniamy 2800+ rekordów kwadransowych do ~744 godzinowych
+        df = df.resample('1h').agg({
+            'business_date': 'first',
+            'load_actual': 'mean',
+            'load_fcst': 'mean'
+        }).reset_index()
 
-                final_columns = ['dtime', 'business_date', 'period', 'load_actual', 'load_fcst']
+        df = df.dropna(subset=['load_actual'])
 
-                for col in final_columns:
-                    if col not in df.columns:
-                        df[col] = None
+        df['period'] = df['dtime'].dt.strftime('%H:00') + ' - ' + (df['dtime'] + pd.Timedelta(hours=1)).dt.strftime(
+            '%H:00')
+        df['business_date'] = df['dtime'].dt.strftime('%Y-%m-%d')
 
-                df['period'] = df['period'].astype(str)
+        final_columns = ['dtime', 'business_date', 'period', 'load_actual', 'load_fcst']
+        return df[final_columns]
 
-                df = df.set_index('dtime')
 
-                df = df.resample('1h').agg({
-                    'business_date' : 'first',
-                    'period' : 'first',
-                    'load_actual' : 'mean',
-                    'load_fcst' : 'mean'
-                }).reset_index()
 
-                df = df[df['dtime'].dt.strftime('%Y-%m-%d') == date_str]
-                df['period'] = df['dtime'].dt.strftime('%H:00') + ' - ' + (
-                            df['dtime'] + pd.Timedelta(hours=1)).dt.strftime('%H:00')
 
-                print(f"-> Pobrano i uśredniono do godzin: {len(df)} rekordów dla daty {date_str}.")
-                return df[final_columns]
-            else:
-                print(f"-> API nie zwróciło żadnych danych dla {date_str}.")
-                return pd.DataFrame()
-        else:
-            print(f"-> Błąd API! Kod: {response.status_code} - {response.text}")
-            return pd.DataFrame()
+

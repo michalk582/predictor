@@ -1,9 +1,6 @@
 import os
 import sys
-
-# Najpierw dodajemy ścieżkę (to uczy Pythona, gdzie jest główny folder)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from database.connection import engine
 from database.models import Base
 

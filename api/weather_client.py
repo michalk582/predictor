@@ -8,10 +8,10 @@ class WeatherApiClient:
     Klasa odpowiedzialna za pobieranie i dopasowywanie historycznych danych pogodowych z Open-Meteo.
     """
 
-    def __init__(self):
-        self.base_url = "https://archive-api.open-meteo.com/v1/archive"
+    def __init__(self, base_url="https://archive-api.open-meteo.com/v1/archive"):
+        self.base_url = base_url
 
-    def get_weather_for_date(self, date_str: str) -> pd.DataFrame:
+    def get_weather_for_date(self, date_str: str, end_date: str) -> pd.DataFrame:
         latitude = 52.23
         longitude = 21.01
 
@@ -19,13 +19,13 @@ class WeatherApiClient:
             "latitude": latitude,
             "longitude": longitude,
             "start_date": date_str,
-            "end_date": date_str,
+            "end_date": end_date,
             "hourly": "temperature_2m,wind_speed_10m,shortwave_radiation",
             "timezone": "UTC"
         }
 
         try:
-            response = requests.get(self.base_url, params=params, timeout=10)
+            response = requests.get(self.base_url, params=params, timeout=30)
         except requests.exceptions.RequestException as e:
             print(f"-> Błąd połączenia z API pogody dla {date_str}: {e}")
             return pd.DataFrame()
@@ -50,10 +50,10 @@ class WeatherApiClient:
                     df['dtime'] = df['dtime'].dt.tz_localize(None)
 
 
-                df['business_date'] = date_str
+                df['business_date'] = df['dtime'].dt.strftime('%Y-%m-%d')
 
                 final_columns = ['dtime', 'business_date', 'temperature', 'wind_speed', 'radiation']
-                print(f"-> Pobrano pogodę; {len(df)} rekordów dla {date_str}.")
+                print(f"-> Pobrano pogodę: {len(df)} rekordów dla zakresu od {date_str} do {end_date}.")
                 return df[final_columns]
             else:
                 print(f"-> API pogody nie zwróciło danych dla {date_str}.")
