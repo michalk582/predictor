@@ -1,116 +1,72 @@
-# scripts/02_backfill.py
 import os
 import sys
-import time
-from datetime import datetime, timedelta
-import pandas as pd
-
-# Dodanie ścieżki do głównego katalogu projektu, aby Python widział paczki 'api' i 'database'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import time
+import pandas as pd
 
 from api.pse_client import PseApiClient
 from api.weather_client import WeatherApiClient
-from database.connection import SessionLocal
 from database.models import KseLoad, WeatherLoad
-from database.connection import engine
-from database.models import Base
+from database.writer import upsert_df
 
-# <<< DOPISZ TO TUTAJ (zaraz pod importami) >>>
-# To polecenie sprawdza bazę i automatycznie tworzy brakujące tabele
-Base.metadata.create_all(bind=engine)
 
-def run_backfill(start_date_str: str, end_date_str: str):
-    pse_client = PseApiClient()
-    weather_client = WeatherApiClient()
-    session = SessionLocal()
+def month_chunks(start: str, end: str):
+    """Dzieli zakres dat na kawałki miesięczne (PSE nie lubi dużych zapytań)."""
+    current = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    while current <= end_ts:
+        chunk_end = min(current + pd.offsets.MonthEnd(0), end_ts)
+        yield current.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
+        current = chunk_end + pd.Timedelta(days=1)
 
-    print(f"Rozpoczynam pełny backfill od {start_date_str} do {end_date_str}...")
+
+def backfill_weather(start: str, end: str) -> None:
+    print("--- Pobieranie danych pogodowych ---")
+    df = WeatherApiClient().get_weather_for_date(start, end)
+    if df.empty:
+        raise RuntimeError(f"Brak danych pogodowych z API dla {start} – {end}")
+    n = upsert_df(WeatherLoad, df)
+    print(f"-> Zapisano/zaktualizowano {n} rekordów pogodowych.\n")
+
+
+def backfill_kse(start: str, end: str) -> list[str]:
+    print("--- Pobieranie danych PSE ---")
+    client = PseApiClient()
+    errors = []
+    for chunk_start, chunk_end in month_chunks(start, end):
+        print(f"Pobieranie KSE: {chunk_start} – {chunk_end}...")
+        try:
+            df = client.get_kse_load(chunk_start, chunk_end)
+            if df.empty:
+                errors.append(f"{chunk_start} – {chunk_end}: brak danych z PSE")
+                continue
+            n = upsert_df(KseLoad, df)
+            print(f"-> Zapisano/zaktualizowano {n} rekordów KSE.")
+        except Exception as e:
+            print(f"[BŁĄD PSE] {chunk_start} – {chunk_end}: {e}")
+            errors.append(f"{chunk_start} – {chunk_end}: {e}")
+        finally:
+            time.sleep(1)
+    return errors
+
+
+def run_backfill(start_date_str: str, end_date_str: str) -> None:
+    print(f"Backfill: {start_date_str} – {end_date_str}")
+    errors = []
 
     try:
-        print("--- Pobieranie danych pogodowych ---")
-        df_weather = weather_client.get_weather_for_date(start_date_str, end_date_str)
-
-        if not df_weather.empty:
-            session.query(WeatherLoad).filter(
-                WeatherLoad.business_date >= start_date_str,
-                WeatherLoad.business_date <= end_date_str
-            ).delete()
-            session.commit()
-
-            weather_objects = [
-                WeatherLoad(
-                    dtime=row['dtime'],
-                    business_date=row['business_date'],
-                    temperature=row['temperature'],
-                    wind_speed=row['wind_speed'],
-                    radiation=row['radiation']
-                )
-                for _, row in df_weather.iterrows()
-            ]
-            session.bulk_save_objects(weather_objects)
-            session.commit()
-            print(f"-> Zapisano {len(weather_objects)} rekordów pogodowych za jednym zamachem!\n")
-
-        else:
-            print("-> Brak danych pogodowych z API.\n")
-
-        # ===============================
-        # KSE
-        # ===============================
-
-        print("--- Rozpoczynam pobieranie danych PSE ---")
-        months = pd.date_range(start=start_date_str, end=end_date_str, freq='MS')
-        if not len(months):
-            months = [pd.to_datetime(start_date_str).replace(day=1)]
-
-        for month_start in months:
-            # Ustalamy początek i koniec paczki (żeby nie wyjść poza ostateczny end_date_str)
-            chunk_start = max(month_start.strftime("%Y-%m-%d"), start_date_str)
-            # Ostatni dzień danego miesiąca:
-            month_end = month_start + pd.offsets.MonthEnd(0)
-            chunk_end = min(month_end.strftime("%Y-%m-%d"), end_date_str)
-
-            print(f"Pobieranie KSE: {chunk_start} - {chunk_end}...")
-
-            try:
-                df_pse = pse_client.get_kse_load(chunk_start, chunk_end)
-
-                # Usuwamy stare dane z tego okresu
-                session.query(KseLoad).filter(
-                    KseLoad.business_date >= chunk_start,
-                    KseLoad.business_date <= chunk_end
-                ).delete()
-
-                if not df_pse.empty:
-                    pse_objects = [
-                        KseLoad(
-                            dtime=row['dtime'],
-                            business_date=row['business_date'],
-                            period=row['period'],
-                            load_actual=row['load_actual'],
-                            load_fcst=row.get('load_fcst')
-                        )
-                        for _, row in df_pse.iterrows()
-                    ]
-                    session.bulk_save_objects(pse_objects)
-                    session.commit()
-                    print(f"-> Zapisano {len(pse_objects)} rekordów KSE dla tego okresu.")
-                else:
-                    session.commit()
-
-            except Exception as e:
-                print(f"[BŁĄD PSE] {chunk_start} - {chunk_end}: {e}")
-                session.rollback()
-            finally:
-                time.sleep(1)
+        backfill_weather(start_date_str, end_date_str)
     except Exception as e:
-        print(f"\n[BŁĄD KRYTYCZNY] Cały proces został przerwany: {e}")
-        session.rollback()
-    finally:
-        session.close()
-        print("\nZakończono działanie skryptu backfill.")
+        print(f"[BŁĄD POGODA] {e}")
+        errors.append(f"pogoda: {e}")
 
+    errors += backfill_kse(start_date_str, end_date_str)
 
+    if errors:
+        # zgłaszamy wyżej, żeby daily_update zalogował błąd zamiast "OK"
+        raise RuntimeError("Backfill zakończony z błędami:\n" + "\n".join(errors))
+    print("Backfill zakończony bez błędów.")
 
 
 if __name__ == "__main__":

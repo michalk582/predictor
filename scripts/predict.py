@@ -39,8 +39,9 @@ def save_predictions(df: pd.DataFrame, forecast_made_at: datetime, model_version
 
     stmt = insert(Predictions).values(rows).on_conflict_do_nothing(constraint="uq_pred_run_dtime")
     with engine.begin() as conn:
-        conn.execute(stmt)
-    print(f"Zapisano {len(rows)} prognoz (forecast_made_at={forecast_made_at}, model={model_version})")
+        result = conn.execute(stmt)
+    print(f"Zapisano {result.rowcount} nowych prognoz, pominięto {len(rows) - result.rowcount} duplikatów "
+          f"(forecast_made_at={forecast_made_at}, model={model_version})")
 
 
 def run_prediction() -> pd.DataFrame:
