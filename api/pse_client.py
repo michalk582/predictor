@@ -45,6 +45,9 @@ class PseApiClient:
         df = df.rename(columns={'demand': 'load_actual'})
         df['load_fcst'] = None
 
+        # 25.10 / zmiana czasu: PSE oznacza powtórzoną godzinę jako "02a" — pomijamy ją
+        df = df[~df['dtime'].astype(str).str.contains(r'\d{2}a:', regex=True)]
+
         df['dtime'] = pd.to_datetime(df['dtime'])
         if df['dtime'].dt.tz is not None:
             df['dtime'] = df['dtime'].dt.tz_localize(None)
