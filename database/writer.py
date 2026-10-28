@@ -12,6 +12,7 @@ def upsert_df(model, df: pd.DataFrame, key: str = "dtime") -> int:
 
     table_cols = [c.name for c in model.__table__.columns]
     data = df[[c for c in table_cols if c in df.columns]]
+    data = data.drop_duplicates(subset=[key], keep="last")
     data = data.astype(object).where(data.notna(), None)   # NaN -> NULL
     rows = data.to_dict(orient="records")
 
