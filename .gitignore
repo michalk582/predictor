@@ -1,3 +1,11 @@
 .env
 training/xgb_model.json
 training/xgb_model_meta.json
+.idea/
+notatki*
+backup.sql
+
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
