@@ -38,6 +38,12 @@ metrics = query("""
     ORDER BY eval_date
 """)
 
+for df in (latest, history):
+    if not df.empty:
+        df["dtime"] = pd.to_datetime(df["dtime"]).dt.tz_localize(
+            "Europe/Warsaw", ambiguous=False, nonexistent="shift_forward"
+        )
+
 # --- Nagłówek i KPI ---------------------------------------------------------
 st.title("⚡ Prognoza zapotrzebowania KSE")
 st.caption("Automatyczny pipeline: dane PSE + prognoza pogody Open-Meteo → XGBoost → ocena dzień po dniu")
